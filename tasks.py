@@ -179,6 +179,7 @@ def parse_with_formats(text, formats):
 
 @task
 def minimal_task():
+    browser = None
     search_options = {}
     for item in workitems.inputs:
         print(f"{item=}")
