@@ -9,20 +9,22 @@ from openpyxl import Workbook
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
 import logging
-import json
-
+import re
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(funcName)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def search_news(browser, search_phrase):
-    """Search news based on a given search phrase."""
-    browser.get("https://www.aljazeera.com/")
-    browser.maximize_window()
+    """
+    Search news based on a given search phrase.
 
+    Args:
+        browser (webdriver): Selenium WebDriver instance.
+        search_phrase (str): The search phrase to use for news search.
+    """
     try:
         search_trigger = browser.find_element(By.CSS_SELECTOR, ".site-header__search-trigger")
         search_trigger.click()
@@ -44,7 +46,16 @@ def search_news(browser, search_phrase):
         logging.warning("Failed to perform search or select date option.")
 
 def extract_articles(browser, target_date):
-    """Extract articles based on the target date."""
+    """
+    Extract articles based on the target date.
+
+    Args:
+        browser (webdriver): Selenium WebDriver instance.
+        target_date (datetime): Target date to filter articles.
+
+    Returns:
+        list: List of BeautifulSoup article elements.
+    """
     article_elements = []
 
     while True:
@@ -65,7 +76,14 @@ def extract_articles(browser, target_date):
     return article_elements
 
 def process_news_data(articles, target_date, search_phrase):
-    """Process extracted news articles and save to Excel."""
+    """
+    Process extracted news articles and save to Excel.
+
+    Args:
+        articles (list): List of BeautifulSoup article elements.
+        target_date (datetime): Target date to filter articles.
+        search_phrase (str): The search phrase used for news search.
+    """
     money_pattern = re.compile(r'\$[\d,]+(\.\d+)?|\d+\s?(dollars|USD)', re.IGNORECASE)
 
     workbook = Workbook()
@@ -102,9 +120,16 @@ def process_news_data(articles, target_date, search_phrase):
 
     workbook.save('news_data.xlsx')
 
-###########################Utils#####################################
-def init_browser(browser_type="chrome"):
-    """Initialize Selenium WebDriver."""
+def init_browser_handler(browser_type="chrome"):
+    """
+    Initialize Selenium WebDriver based on specified browser type.
+
+    Args:
+        browser_type (str): Browser type to initialize ('chrome' or 'firefox').
+
+    Returns:
+        webdriver: Initialized Selenium WebDriver instance.
+    """
     if browser_type.lower() == "chrome":
         return webdriver.Chrome()
     elif browser_type.lower() == "firefox":
@@ -112,6 +137,22 @@ def init_browser(browser_type="chrome"):
     else:
         raise ValueError("Unsupported browser type.")
 
+def open_browser(browser):
+    """
+    Open the specified browser and navigate to a default URL.
+
+    Args:
+        browser (webdriver): Selenium WebDriver instance to use.
+    """
+    try:
+        browser.get("https://www.aljazeera.com/")
+        browser.maximize_window()
+
+    except WebDriverException as e:
+        logging.error(f"WebDriverException occurred: {e}")
+
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
 
 def download_image(url, output_dir='output/images', filename=None):
     """
@@ -148,24 +189,48 @@ def download_image(url, output_dir='output/images', filename=None):
         return None
 
 def get_article_date(article_element):
-    """Extract article date from the HTML element."""
+    """
+    Extract article date from the HTML element.
+
+    Args:
+        article_element (BeautifulSoup): BeautifulSoup element representing the article.
+
+    Returns:
+        datetime or None: Extracted datetime object representing the article date, or None if not found.
+    """
     try:
-        # date_element = article_element.find("div", class_="gc__date gc__date--published")
         date_element = article_element.find("div", class_="gc__date__date")
         if date_element:
             date_text = date_element.find("span", attrs={"aria-hidden": True}).get_text(strip=True)
-            return parse_article_date(date_text) 
+            return parse_article_date(date_text)
     except Exception as e:
         logging.warning(f"Failed to extract date from article: {e}")
     return None
 
 def parse_article_date(date_text):
-    """Parse article date with specified date formats."""
+    """
+    Parse article date with specified date formats.
+
+    Args:
+        date_text (str): Text representation of the article date.
+
+    Returns:
+        datetime or None: Parsed datetime object representing the article date, or None if parsing fails.
+    """
     date_formats = ["Last update %d %b %Y", "%d %b %Y"]
     return parse_with_formats(date_text, date_formats)
 
 def parse_with_formats(text, formats):
-    """Try parsing text with multiple date formats."""
+    """
+    Try parsing text with multiple date formats.
+
+    Args:
+        text (str): Text representation of the date to parse.
+        formats (list): List of date formats to attempt parsing.
+
+    Returns:
+        datetime or None: Parsed datetime object representing the date, or None if parsing fails.
+    """
     for date_format in formats:
         try:
             return datetime.strptime(text, date_format)
@@ -175,22 +240,22 @@ def parse_with_formats(text, formats):
     return None
 
 
-###########################Utils#####################################
-
 @task
 def minimal_task():
+    """
+    Task to perform minimal news scraping based on input parameters.
+    Expects input parameters 'search_phrase' (str) and 'num_months' (int) from work item.
+    """
     browser = None
-    search_options = {}
-    for item in workitems.inputs:
-        print(f"{item=}")
-        search_options = item.payload['input_search_phrase']
-
-    print(f"{item.payload=}")
-
-    search_phrase = search_options["search_phrase"]
-    num_months  = search_options["num_months"]
     try:
-        browser = init_browser()
+        # Retrieve search options from work item inputs
+        search_options = workitems.inputs.current.payload["input_search_phrase"]
+
+        search_phrase = search_options["search_phrase"]
+        num_months = int(search_options["num_months"])
+
+        browser = init_browser_handler()
+        open_browser(browser)
         search_news(browser, search_phrase)
         target_date = datetime.now() - timedelta(days=30 * num_months)
         articles = extract_articles(browser, target_date)
@@ -203,17 +268,7 @@ def minimal_task():
     finally:
         if browser:
             browser.quit()
-            logging.info("Cleaning up completed.")
-
-
-
-
-
-
-
-
-
-
+        logging.info("Cleaning up completed.")
 
 
 
