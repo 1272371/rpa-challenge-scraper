@@ -184,7 +184,7 @@ def minimal_task():
         print(f"{item=}")
         search_options = item.payload['input_search_phrase']
 
-    print()
+    print(f"{item.payload=}")
 
     search_phrase = search_options["search_phrase"]
     num_months  = search_options["num_months"]
