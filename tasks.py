@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import logging
+import shutil
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from openpyxl import Workbook
@@ -128,26 +129,62 @@ def process_news_data(articles, target_date, search_phrase):
 
     workbook.save('news_data.xlsx')
 
+import shutil
+
+def find_binary_location(browser_name):
+    """
+    Find the binary location of the specified browser.
+
+    Args:
+        browser_name (str): Name of the browser ('chrome' or 'firefox').
+
+    Returns:
+        str or None: Path to the binary location of the browser, or None if not found.
+    """
+    if browser_name == "chrome":
+        # Check common locations for Chrome executable
+        chrome_path = shutil.which("google-chrome")
+        if not chrome_path:
+            chrome_path = shutil.which("chromium-browser")
+        return chrome_path
+
+    elif browser_name == "firefox":
+        # Check common locations for Firefox executable
+        firefox_path = shutil.which("firefox")
+        if not firefox_path:
+            firefox_path = shutil.which("mozilla-firefox")
+        return firefox_path
+
+    return None
 
 def init_browser_handler(browser_type=None, options=None):
+    """
+    Initialize Selenium WebDriver based on the specified browser type and options.
+
+    Args:
+        browser_type (str, optional): Browser type to initialize ('chrome' or 'firefox').
+        options (dict, optional): Dictionary of browser-specific options (e.g., 'headless').
+
+    Returns:
+        webdriver: Initialized Selenium WebDriver instance.
+    """
     if browser_type.lower() == "chrome":
         chrome_options = ChromeOptions()
         if options and "headless" in options:
             # chrome_options.add_argument('--headless')
-            chrome_options.binary_location = '/usr/bin/google-chrome'
             chrome_options.add_argument("start-maximized")
-            #chrome_options.add_argument('--remote-debugging-pipe')
-            service = ChromeService(ChromeDriverManager().install(), service_log_path='chromedriver.log')
+        binary_location = find_binary_location("chrome")
+        service = ChromeService(ChromeDriverManager().install(), service_log_path='chromedriver.log')
+        chrome_options.binary_location = binary_location
         return webdriver.Chrome(service=service, options=chrome_options)
 
-    if browser_type.lower() == "firefox":
+    elif browser_type.lower() == "firefox":
         firefox_options = FirefoxOptions()
-        firefox_options.binary_location = '/usr/bin/firefox'
-        if options and "headless" in options:
-            # firefox_options.add_argument('--headless')
-            # chrome_options.add_argument('--remote-debugging-pipe')
-            pass
+        binary_location = find_binary_location("firefox")
         service = FirefoxService(GeckoDriverManager().install(), service_log_path='geckodriver.log')
+        firefox_options.binary_location = binary_location
+        if options and "headless" in options:
+            firefox_options.add_argument('--headless')
         return webdriver.Firefox(service=service, options=firefox_options)
 
     raise ValueError("Unsupported browser type.")
