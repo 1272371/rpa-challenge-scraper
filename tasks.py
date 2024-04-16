@@ -1,18 +1,22 @@
-from robocorp.tasks import task
-from robocorp import workitems
-from datetime import datetime, timedelta
 import os
+import re
 import requests
-from selenium import webdriver
+import logging
 from bs4 import BeautifulSoup
+from selenium import webdriver
 from openpyxl import Workbook
+from datetime import datetime
+from datetime import timedelta
+from robocorp import workitems
+from robocorp.tasks import task
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
-import logging
-import re
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(funcName)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -120,22 +124,37 @@ def process_news_data(articles, target_date, search_phrase):
 
     workbook.save('news_data.xlsx')
 
-def init_browser_handler(browser_type="chrome"):
+def init_browser_handler(browser_type="chrome", driver_path=None, options=None):
     """
     Initialize Selenium WebDriver based on specified browser type.
 
     Args:
         browser_type (str): Browser type to initialize ('chrome' or 'firefox').
+        driver_path (str): Path to the WebDriver executable (optional).
+        options (dict): Dictionary of browser-specific options (optional).
 
     Returns:
         webdriver: Initialized Selenium WebDriver instance.
     """
     if browser_type.lower() == "chrome":
-        return webdriver.Chrome()
+        chrome_options = ChromeOptions()
+        if options and "headless" in options:
+            chrome_options.add_argument("--headless")
+        if driver_path:
+            return webdriver.Chrome(executable_path=driver_path, options=chrome_options)
+        else:
+            return webdriver.Chrome(options=chrome_options)
+
     elif browser_type.lower() == "firefox":
-        return webdriver.Firefox()
+        firefox_options = FirefoxOptions()
+        if options and "headless" in options:
+            firefox_options.add_argument("--headless")
+        if driver_path:
+            return webdriver.Firefox(executable_path=driver_path, options=firefox_options)
+        else:
+            return webdriver.Firefox(options=firefox_options)
+
     else:
-        logging.error(f"An unexpected error occurred: {e}")
         raise ValueError("Unsupported browser type.")
 
 def open_browser(browser):
@@ -255,7 +274,7 @@ def minimal_task():
         search_phrase = search_options["search_phrase"]
         num_months = int(search_options["num_months"])
 
-        browser = init_browser_handler()
+        browser = init_browser_handler(browser_type="chrome", driver_path="chromedriver", options=None)
         open_browser(browser)
         search_news(browser, search_phrase)
         target_date = datetime.now() - timedelta(days=30 * num_months)
@@ -270,3 +289,46 @@ def minimal_task():
         if browser:
             browser.quit()
         logging.info("Cleaning up completed.")
+
+
+
+
+
+
+
+# @task
+# def create_work_item_task():
+#     """
+#     Task to programmatically create a Robocloud work item with specified parameters.
+
+#     Arguments:
+#         search_phrase (str): The search phrase for news scraping.
+#         months (int): Number of months to look back for news articles.
+
+#     Usage:
+#         create_work_item_task("AI", 2)
+#     """
+#     search_phrase = "AI"
+#     months = 1
+#     # Define your Robocloud API credentials
+#     api_key = 'n0quinMUdxzsyCnu85iZho8mWr248fpy5x67bXdXIe0FjSujUibUwuwSqdOi9gIGJWtRhRQtlI7TqUDb2unjW5g7byqrVdAurx5eBQJZamzVnivHqHyoHn1gPTfuW7PmH'
+#     workspace_id = 'Harmony Mncube'
+#     # Specify the task to execute and input parameters
+#     task_name = 'Harmony Mncube'
+
+#     payload = {
+#         'search_phrase': search_phrase,
+#         'num_months': months
+#     }
+
+#     # Attempt to create the work item with the specified task and input parameters
+#     try:
+#         item = dict(input_search_phrase=payload)
+#         response = workitems.outputs.create(item)
+#         print(f": {response}")
+#     except Exception as e:
+#         print(f"Error creating work item: {str(e)}")
+
+#     for item in workitems.inputs:
+#         search_options = item.payload
+#         print(search_options)
