@@ -16,8 +16,10 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(funcName)s - %(message)s')
@@ -127,45 +129,28 @@ def process_news_data(articles, target_date, search_phrase):
     workbook.save('news_data.xlsx')
 
 
-def init_browser_handler(browser_type=None, driver_path=None, options=None):
-    """
-    Initialize Selenium WebDriver based on specified browser type. If no browser type is specified,
-    it attempts to open the default browser.
-
-    Args:
-        browser_type (str, optional): Browser type to initialize ('chrome' or 'firefox'). If None, attempts to use the system's default browser.
-        driver_path (str, optional): Path to the WebDriver executable (optional).
-        options (dict, optional): Dictionary of browser-specific options (optional).
-
-    Returns:
-        webdriver: Initialized Selenium WebDriver instance.
-    """
-    if browser_type is not None and browser_type.lower() == "chrome":
+def init_browser_handler(browser_type=None, options=None):
+    if browser_type.lower() == "chrome":
         chrome_options = ChromeOptions()
         if options and "headless" in options:
-            chrome_options.page_load_strategy = 'normal'
-            chrome_options.add_argument('--remote-debugging-pipe')
+            # chrome_options.add_argument('--headless')
+            chrome_options.binary_location = '/usr/bin/google-chrome'
             chrome_options.add_argument("start-maximized")
-            # chrome_options.add_argument("--headless")
-            chrome_options.binary_location = ChromeDriverManager().install()
-        if driver_path:
-            chrome_options.binary_location = driver_path
-        logging.info(f"Returning {browser_type.lower()} driver ")
-        # ChromeDriverManager().install(), to be added when uploading to cloud
-        return webdriver.Chrome(options=chrome_options)
+            #chrome_options.add_argument('--remote-debugging-pipe')
+            service = ChromeService(ChromeDriverManager().install(), service_log_path='chromedriver.log')
+        return webdriver.Chrome(service=service, options=chrome_options)
 
-    elif browser_type is not None and browser_type.lower() == "firefox":
+    if browser_type.lower() == "firefox":
         firefox_options = FirefoxOptions()
+        firefox_options.binary_location = '/usr/bin/firefox'
         if options and "headless" in options:
-            firefox_options.add_argument('--remote-debugging-pipe')
-            firefox_options.add_argument("--headless")
-        if driver_path:
-            firefox_options.binary_location = driver_path
-        logging.info(f"Returning {browser_type.lower()} driver")
-        return webdriver.Firefox(options=firefox_options)
-    else:
-        raise ValueError("Unsupported browser type.")
-    
+            # firefox_options.add_argument('--headless')
+            # chrome_options.add_argument('--remote-debugging-pipe')
+            pass
+        service = FirefoxService(GeckoDriverManager().install(), service_log_path='geckodriver.log')
+        return webdriver.Firefox(service=service, options=firefox_options)
+
+    raise ValueError("Unsupported browser type.")
 
 def open_browser(browser):
     """
@@ -283,7 +268,7 @@ def minimal_task():
         search_phrase = search_options["search_phrase"]
         num_months = int(search_options["num_months"])
 
-        browser = init_browser_handler(browser_type = "chRoMe", options={"headless":True})
+        browser = init_browser_handler(browser_type = "chrome", options={"headless":True})
         open_browser(browser)
         search_news(browser, search_phrase)
         target_date = datetime.now() - timedelta(days=30 * num_months)
