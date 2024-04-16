@@ -135,6 +135,7 @@ def init_browser_handler(browser_type="chrome"):
     elif browser_type.lower() == "firefox":
         return webdriver.Firefox()
     else:
+        logging.error(f"An unexpected error occurred: {e}")
         raise ValueError("Unsupported browser type.")
 
 def open_browser(browser):
@@ -269,45 +270,3 @@ def minimal_task():
         if browser:
             browser.quit()
         logging.info("Cleaning up completed.")
-
-
-
-
-
-
-# @task
-# def create_work_item_task():
-#     """
-#     Task to programmatically create a Robocloud work item with specified parameters.
-
-#     Arguments:
-#         search_phrase (str): The search phrase for news scraping.
-#         months (int): Number of months to look back for news articles.
-
-#     Usage:
-#         create_work_item_task("AI", 2)
-#     """
-#     search_phrase = "AI"
-#     months = 1
-#     # Define your Robocloud API credentials
-#     api_key = 'n0quinMUdxzsyCnu85iZho8mWr248fpy5x67bXdXIe0FjSujUibUwuwSqdOi9gIGJWtRhRQtlI7TqUDb2unjW5g7byqrVdAurx5eBQJZamzVnivHqHyoHn1gPTfuW7PmH'
-#     workspace_id = 'Harmony Mncube'
-#     # Specify the task to execute and input parameters
-#     task_name = 'Harmony Mncube'
-
-#     payload = {
-#         'search_phrase': search_phrase,
-#         'num_months': months
-#     }
-
-#     # Attempt to create the work item with the specified task and input parameters
-#     try:
-#         item = dict(input_search_phrase=payload)
-#         response = workitems.outputs.create(item)
-#         print(f": {response}")
-#     except Exception as e:
-#         print(f"Error creating work item: {str(e)}")
-
-#     for item in workitems.inputs:
-#         search_options = item.payload
-#         print(search_options)
