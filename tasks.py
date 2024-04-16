@@ -181,6 +181,7 @@ def parse_with_formats(text, formats):
 def minimal_task():
     search_options = {}
     for item in workitems.inputs:
+        print(f"{item=}")
         search_options = item.payload['input_search_phrase']
 
     print()
