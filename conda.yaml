@@ -14,3 +14,4 @@ dependencies:
     - robocorp==1.4.0             # https://pypi.org/project/robocorp
     - robocorp-browser==2.2.1     # https://pypi.org/project/robocorp-browser
     - webdriver-manager==4.0.1
+    - selenium

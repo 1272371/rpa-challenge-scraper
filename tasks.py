@@ -1,65 +1,61 @@
+import logging
 import os
 import re
 import requests
-import logging
-import shutil
+from datetime import datetime, timedelta
+
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from openpyxl import Workbook
-from datetime import datetime
-from datetime import timedelta
-from robocorp import workitems
-from robocorp.tasks import task
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, ElementNotVisibleException
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.firefox import GeckoDriverManager
 
 
+from RPA.Browser.Selenium import Selenium
+from RPA.Excel.Files import Files
+from robocorp import workitems
+from robocorp.tasks import task
+
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(funcName)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 def search_news(browser, search_phrase):
     """
     Search news based on a given search phrase.
 
     Args:
-        browser (webdriver): Selenium WebDriver instance.
+        browser (Selenium): RPA Browser instance.
         search_phrase (str): The search phrase to use for news search.
     """
     try:
-        search_trigger = browser.find_element(By.CSS_SELECTOR, ".site-header__search-trigger")
-        search_trigger.click()
+        browser.click_element_if_visible('//*[@class="site-header__search-trigger"]')
 
-        search_input = WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".search-bar__input")))
-        search_input.clear()
-        search_input.send_keys(search_phrase)
-        search_input.send_keys(Keys.RETURN)
+        search_input = WebDriverWait(browser.driver, 60, 0.5, ignored_exceptions=[TimeoutException]).until(EC.visibility_of_element_located((By.XPATH, '//*[@class="search-bar__input"]')))
+        browser.input_text(search_input, search_phrase)
 
-        # Sort by date
-        sort_dropdown = WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.ID, "search-sort-option")))
-        sort_dropdown.click()
+        browser.press_keys(search_input, Keys.ENTER)
 
-        date_option = WebDriverWait(browser, 5).until(EC.element_to_be_clickable((By.XPATH, "//option[@value='date']")))
-        date_option.click()
+        sort_by_date = WebDriverWait(browser.driver, 60, 0.5, ignored_exceptions=[TimeoutException]).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="search-sort-option"]')))
+        browser.click_button_when_visible(sort_by_date)
 
-        WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".search-result__list")))
-    except TimeoutException:
-        logging.warning("Failed to perform search or select date option.")
+        browser.select_from_list_by_value('//*[@id="search-sort-option"]', 'date')
+
+        WebDriverWait(browser.driver,60, 0.5, ignored_exceptions=[TimeoutException, ElementNotVisibleException]).until(EC.visibility_of_element_located((By.XPATH, '//*[@class="search-result__list"]')))
+
+    except Exception as e:
+        logger.error(f"Failed to perform search or select date option. Error: {e}")
+
+
 
 def extract_articles(browser, target_date):
     """
     Extract articles based on the target date.
 
     Args:
-        browser (webdriver): Selenium WebDriver instance.
+        browser (Selenium): RPA Browser instance.
         target_date (datetime): Target date to filter articles.
 
     Returns:
@@ -68,177 +64,29 @@ def extract_articles(browser, target_date):
     article_elements = []
 
     while True:
-        WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".gc__title")))
-        soup = BeautifulSoup(browser.page_source, 'html.parser')
-        article_elements = soup.find_all("article", class_="gc u-clickable-card gc--type-customsearch#result gc--list gc--with-image")
+        try:
+            show_more_button = WebDriverWait(browser.driver, 60, 0.5, ignored_exceptions=[TimeoutException]).until(EC.presence_of_element_located((By.CLASS_NAME, 'search-result__list')))
+            browser.wait_until_element_is_visible('class:search-result__list')
+            soup = BeautifulSoup(browser.get_source(), 'html.parser')
+            article_elements = soup.find_all("article", class_="gc u-clickable-card gc--type-customsearch#result gc--list gc--with-image")
 
-        last_article_date = get_article_date(article_elements[-1])
-        if last_article_date and last_article_date < target_date:
+            last_article_date = get_article_date(article_elements[-1])
+            if last_article_date and last_article_date < target_date:
+                break
+
+            show_more_button = WebDriverWait(browser.driver, 60, 0.5, ignored_exceptions=[TimeoutException]).until(EC.presence_of_element_located((By.CSS_SELECTOR, "button.show-more-button")))
+            browser.click_element_when_clickable(show_more_button)
+
+        except TimeoutException as e:
+            logger.error(f"Timeout waiting for 'Show more' button : {e}")
             break
 
-        try:
-            show_more_button = WebDriverWait(browser, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "button.show-more-button")))
-            browser.execute_script("arguments[0].click();", show_more_button)
-        except TimeoutException:
+        except Exception as e:
+            logger.error(f"Error extracting articles: {e}")
             break
 
     return article_elements
 
-def process_news_data(articles, target_date, search_phrase):
-    """
-    Process extracted news articles and save to Excel.
-
-    Args:
-        articles (list): List of BeautifulSoup article elements.
-        target_date (datetime): Target date to filter articles.
-        search_phrase (str): The search phrase used for news search.
-    """
-    money_pattern = re.compile(r'\$[\d,]+(\.\d+)?|\d+\s?(dollars|USD)', re.IGNORECASE)
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.append(['Title', 'Date', 'Description', 'Image URI', 'Count Phrases', 'Contains Money'])
-
-    for idx, article in enumerate(articles):
-        title_element = article.find("h3", class_="gc__title").find("a")
-        if not title_element:
-            continue
-
-        title = title_element.text.strip()
-        date = get_article_date(article)
-
-        if date and date < target_date:
-            break
-
-        description_element = article.find("div", class_="gc__excerpt").find("p")
-        description = description_element.get_text(strip=True) if description_element else ""
-        image_element = article.find("img", class_="gc__image")
-        image_url = image_element["src"] if image_element else ""
-        image_uri = download_image(image_url, filename=f"img-{idx}")
-        count_phrases = title.lower().count(search_phrase.lower()) + description.lower().count(search_phrase.lower())
-        contains_money = bool(money_pattern.search(title)) or bool(money_pattern.search(description))
-
-        sheet.append([
-            title,
-            date.strftime("%d %b %Y") if date else "",
-            description,
-            image_uri,
-            count_phrases,
-            "True" if contains_money else "False"
-        ])
-
-    workbook.save('news_data.xlsx')
-
-import shutil
-
-def find_binary_location(browser_name):
-    """
-    Find the binary location of the specified browser.
-
-    Args:
-        browser_name (str): Name of the browser ('chrome' or 'firefox').
-
-    Returns:
-        str or None: Path to the binary location of the browser, or None if not found.
-    """
-    if browser_name == "chrome":
-        # Check common locations for Chrome executable
-        chrome_path = shutil.which("google-chrome")
-        if not chrome_path:
-            chrome_path = shutil.which("chromium-browser")
-        return chrome_path
-
-    elif browser_name == "firefox":
-        # Check common locations for Firefox executable
-        firefox_path = shutil.which("firefox")
-        if not firefox_path:
-            firefox_path = shutil.which("mozilla-firefox")
-        return firefox_path
-
-    return None
-
-def init_browser_handler(browser_type=None, options=None):
-    """
-    Initialize Selenium WebDriver based on the specified browser type and options.
-
-    Args:
-        browser_type (str, optional): Browser type to initialize ('chrome' or 'firefox').
-        options (dict, optional): Dictionary of browser-specific options (e.g., 'headless').
-
-    Returns:
-        webdriver: Initialized Selenium WebDriver instance.
-    """
-    if browser_type.lower() == "chrome":
-        chrome_options = ChromeOptions()
-        if options and "headless" in options:
-            # chrome_options.add_argument('--headless')
-            chrome_options.add_argument("start-maximized")
-        binary_location = find_binary_location("chrome")
-        service = ChromeService(ChromeDriverManager().install(), service_log_path='chromedriver.log')
-        chrome_options.binary_location = binary_location
-        return webdriver.Chrome(service=service, options=chrome_options)
-
-    elif browser_type.lower() == "firefox":
-        firefox_options = FirefoxOptions()
-        binary_location = find_binary_location("firefox")
-        service = FirefoxService(GeckoDriverManager().install(), service_log_path='geckodriver.log')
-        firefox_options.binary_location = binary_location
-        if options and "headless" in options:
-            firefox_options.add_argument('--headless')
-        return webdriver.Firefox(service=service, options=firefox_options)
-
-    raise ValueError("Unsupported browser type.")
-
-def open_browser(browser):
-    """
-    Open the specified browser and navigate to a default URL.
-
-    Args:
-        browser (webdriver): Selenium WebDriver instance to use.
-    """
-    try:
-        browser.get("https://www.aljazeera.com/")
-        logging.info("Successfully opened browser and navigated to default URL.")
-
-    except WebDriverException as e:
-        logging.error(f"WebDriverException occurred: {e}")
-
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
-
-def download_image(url, output_dir='output/images', filename=None):
-    """
-    Download an image from the specified URL and save it to the specified directory with the given filename.
-
-    Args:
-        url (str): URL of the image to download.
-        output_dir (str): Directory where the downloaded image will be saved.
-        filename (str): The name of the file to save the image as. If None, the filename is extracted from the URL.
-
-    Returns:
-        str or None: File path of the downloaded image if successful, None otherwise.
-    """
-    try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-
-        # Create the output directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Use the provided filename or extract it from the URL if not provided
-        if not filename:
-            filename = os.path.basename(url)
-        save_path = os.path.join(output_dir, filename)
-
-        with open(save_path, 'wb') as file:
-            file.write(response.content)
-
-        logger.info(f"Image downloaded successfully and saved to: {save_path}")
-        return save_path  # Return the file path of the downloaded image
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error downloading image: {e}")
-        return None
 
 def get_article_date(article_element):
     """
@@ -255,9 +103,9 @@ def get_article_date(article_element):
         if date_element:
             date_text = date_element.find("span", attrs={"aria-hidden": True}).get_text(strip=True)
             return parse_article_date(date_text)
-    except Exception as e:
-        logging.warning(f"Failed to extract date from article: {e}")
-    return None
+    except Exception:
+        return None
+
 
 def parse_article_date(date_text):
     """
@@ -271,6 +119,7 @@ def parse_article_date(date_text):
     """
     date_formats = ["Last update %d %b %Y", "%d %b %Y"]
     return parse_with_formats(date_text, date_formats)
+
 
 def parse_with_formats(text, formats):
     """
@@ -288,8 +137,87 @@ def parse_with_formats(text, formats):
             return datetime.strptime(text, date_format)
         except ValueError:
             continue
-    logging.warning("Failed to parse date with any of the specified formats.")
     return None
+
+
+def process_news_data(articles, target_date, search_phrase):
+    """
+    Process extracted news articles and save to Excel.
+
+    Args:
+        articles (list): List of BeautifulSoup article elements.
+        target_date (datetime): Target date to filter articles.
+        search_phrase (str): The search phrase used for news search.
+    """
+    workbook = Files()
+    workbook.create_workbook(path="./output/news_data.xlsx", fmt="xlsx", sheet_name="News Articles")
+
+    table =[]
+    for idx, article in enumerate(articles):
+        title_element = article.find("h3", class_="gc__title").find("a")
+        if not title_element:
+            continue
+
+        title = title_element.text.strip()
+        date = get_article_date(article)
+
+        if date and date < target_date:
+            break
+
+        description_element = article.find("div", class_="gc__excerpt").find("p")
+        description = description_element.get_text(strip=True) if description_element else ""
+        image_element = article.find("img", class_="gc__image")
+        image_url = image_element["src"] if image_element else ""
+        image_uri = download_image(image_url, filename=f"img-{idx}")
+        count_phrases = title.lower().count(search_phrase.lower()) + description.lower().count(search_phrase.lower())
+        contains_money = bool(re.search(r"\$[\d,]+(\.\d+)?|\d+\s?(dollars|USD)", title, re.IGNORECASE)) or bool(re.search(r"\$[\d,]+(\.\d+)?|\d+\s?(dollars|USD)", description, re.IGNORECASE))
+        table.append({
+            'Title':title,
+            'Date':date.strftime("%d %b %Y") if date else "",
+            'Description':description,
+            'Image URI':image_uri,
+            'Count Phrases':count_phrases,
+            'Contains Money':"True" if contains_money else "False",
+        })
+    workbook.append_rows_to_worksheet(table, header=True)
+    workbook.save_workbook()
+
+
+def download_image(url, output_dir='output/images', filename=None):
+    """
+    Download an image from the specified URL and save it to the specified directory with the given filename.
+
+    Args:
+        url (str): URL of the image to download.
+        output_dir (str): Directory where the downloaded image will be saved.
+        filename (str): The name of the file to save the image as. If None, the filename is extracted from the URL.
+
+    Returns:
+        str or None: File path of the downloaded image if successful, None otherwise.
+    """
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        if not filename:
+            filename = os.path.basename(url)
+        save_path = os.path.join(output_dir, filename)
+
+        with open(save_path, 'wb') as file:
+            file.write(response.content)
+
+        return save_path
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error downloading image: {e}")
+        return None
+
+
+def open_the_intranet_website(browser, url):
+    """Navigates to the given URL and maximizes the browser window."""
+    browser.open_available_browser(url, maximized=True)
 
 
 @task
@@ -298,68 +226,28 @@ def minimal_task():
     Task to perform minimal news scraping based on input parameters.
     Expects input parameters 'search_phrase' (str) and 'num_months' (int) from work item.
     """
-    browser = None
+    browser = Selenium()
     try:
-        # Retrieve search options from work item inputs
         search_options = workitems.inputs.current.payload["input_search_phrase"]
         search_phrase = search_options["search_phrase"]
         num_months = int(search_options["num_months"])
+        url = "https://www.aljazeera.com/"
 
-        browser = init_browser_handler(browser_type = "chrome", options={"headless":True})
-        open_browser(browser)
+        browser.set_download_directory("output/images")
+        open_the_intranet_website(browser, url)
         search_news(browser, search_phrase)
+
         target_date = datetime.now() - timedelta(days=30 * num_months)
         articles = extract_articles(browser, target_date)
         process_news_data(articles, target_date, search_phrase)
-        logging.info(f"Scraping {search_phrase} completed successfully!")
+
+        logger.info(f"Scraping {search_phrase} completed successfully!")
 
     except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
+        logger.error(f"An error occurred: {str(e)}")
 
     finally:
         if browser:
-            browser.quit()
-        logging.info("Cleaning up completed.")
+            browser.close_all_browsers()
+        logger.warning("Cleaning up completed.")
 
-
-
-
-
-
-
-# @task
-# def create_work_item_task():
-#     """
-#     Task to programmatically create a Robocloud work item with specified parameters.
-
-#     Arguments:
-#         search_phrase (str): The search phrase for news scraping.
-#         months (int): Number of months to look back for news articles.
-
-#     Usage:
-#         create_work_item_task("AI", 2)
-#     """
-#     search_phrase = "AI"
-#     months = 1
-#     # Define your Robocloud API credentials
-#     api_key = 'n0quinMUdxzsyCnu85iZho8mWr248fpy5x67bXdXIe0FjSujUibUwuwSqdOi9gIGJWtRhRQtlI7TqUDb2unjW5g7byqrVdAurx5eBQJZamzVnivHqHyoHn1gPTfuW7PmH'
-#     workspace_id = 'Harmony Mncube'
-#     # Specify the task to execute and input parameters
-#     task_name = 'Harmony Mncube'
-
-#     payload = {
-#         'search_phrase': search_phrase,
-#         'num_months': months
-#     }
-
-#     # Attempt to create the work item with the specified task and input parameters
-#     try:
-#         item = dict(input_search_phrase=payload)
-#         response = workitems.outputs.create(item)
-#         print(f": {response}")
-#     except Exception as e:
-#         print(f"Error creating work item: {str(e)}")
-
-#     for item in workitems.inputs:
-#         search_options = item.payload
-#         print(search_options)
