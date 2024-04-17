@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def search_news(browser, search_phrase):
+    """Search news based on a given search phrase."""
     try:
         browser.click_element_if_visible('//*[@class="site-header__search-trigger"]')
         search_input = WebDriverWait(browser.driver, 60).until(EC.visibility_of_element_located((By.XPATH, '//*[@class="search-bar__input"]')))
@@ -39,6 +40,7 @@ def search_news(browser, search_phrase):
 
 
 def extract_articles(browser, target_date):
+    """Extract articles based on the target date."""
     article_elements = []
 
     while True:
@@ -66,6 +68,7 @@ def extract_articles(browser, target_date):
 
 
 def get_article_date(article_element):
+    """Extract article date from the HTML element."""
     try:
         date_element = article_element.find("div", class_="gc__date__date")
         if date_element:
@@ -83,6 +86,7 @@ def get_article_date(article_element):
 
 
 def parse_article_date(date_text):
+    """Parse article date with specified date formats."""
     date_formats = ["Last update %d %b %Y", "%d %b %Y"]
     for date_format in date_formats:
         try:
@@ -93,6 +97,7 @@ def parse_article_date(date_text):
 
 
 def parse_relative_date(text):
+    """Parse relative article date from text."""
     relative_time_pattern = re.compile(r"(\d+)\s+(hour|hours|day|days|minute|minutes|year|years)\s+ago")
     match = relative_time_pattern.search(text)
     if match:
@@ -104,6 +109,7 @@ def parse_relative_date(text):
 
 
 def clean_string(input_string):
+    """Clean input string by removing patterns and extra whitespace."""
     cleaned_string = re.sub(r"\b\d+\s+\w+\s+ago\b", "", input_string)
     cleaned_string = cleaned_string.replace("...", "").strip()
     cleaned_string = re.sub(r"\s+", " ", cleaned_string)
@@ -111,6 +117,7 @@ def clean_string(input_string):
 
 
 def process_news_data(articles, target_date, search_phrase):
+    """Process extracted news articles and save to Excel."""
     workbook = Files()
     workbook.create_workbook(path="./output/news_data.xlsx", fmt="xlsx", sheet_name="News Articles")
 
@@ -147,6 +154,7 @@ def process_news_data(articles, target_date, search_phrase):
 
 
 def download_image(url, output_dir='output/images', filename=None):
+    """Download an image from URL and save it to the specified directory."""
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -168,11 +176,18 @@ def download_image(url, output_dir='output/images', filename=None):
 
 
 def open_the_intranet_website(browser, url):
+    """Open the intranet website in a browser."""
     browser.open_available_browser(url, maximized=True)
 
 
 @task
 def minimal_task():
+    """
+    Task to perform minimal news scraping based on input parameters.
+    Expects
+
+ input parameters 'search_phrase' (str) and 'num_months' (int) from work item.
+    """
     browser = Selenium()
     try:
         search_options = workitems.inputs.current.payload["input_search_phrase"]
